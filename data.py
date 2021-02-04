@@ -14,6 +14,7 @@ from sklearn.datasets import make_classification, make_hastie_10_2, make_moons, 
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
 import scipy.sparse
+from sklearn.tree import plot_tree
 
 #from skhubness.data import load_dexter
 
@@ -549,7 +550,7 @@ def phishing():
 # TODO: Correlation heatmap
 
 if __name__ == "__main__":
-    from project1 import save_fig, label
+    from project1 import save_fig, label, get_path
     np.set_printoptions(suppress=True)
 
     # https://stackoverflow.com/a/29432741
@@ -573,7 +574,8 @@ if __name__ == "__main__":
         feature_importances = np.sort(dt.feature_importances_)[::-1]
         feature_importances = feature_importances[feature_importances > 0]
         print('Feature importances', np.sum(feature_importances > 0), np.round(feature_importances, 4))
-
+        #print('Features used', len(np.unique(dt.tree_.feature)))
+        
         X_df = pd.DataFrame(X)
         y_df = pd.DataFrame(y)
         corrs = []
@@ -617,11 +619,24 @@ if __name__ == "__main__":
             ax.set_ylabel('Count of features')
             save_fig('feature_correlations', data_set_name)
 
+    def plot_dt_tree(dt, data_set_name):
+        plt.gcf().set_size_inches(50, 30)
+        plot_tree(dt, fontsize=10)
+        plt.savefig(get_path('decision_tree', data_set_name, None) + '.png')
+        plt.close()
+        print('Features used', len(np.unique(dt.tree_.feature)))
 
     def analyze_polish_bankruptcy():
         X, y = polish_bankruptcy()
         data_set_name = label(polish_bankruptcy)
+
+        dt = DecisionTreeClassifier(class_weight='balanced', max_depth=12, max_leaf_nodes=175)
+        dt.fit(X, y)
+        plot_dt_tree(dt, data_set_name)
+
         common_analysis(data_set_name, X, y, True)
+        
+
 
         """
         X = StandardScaler().fit_transform(X)
@@ -653,6 +668,10 @@ if __name__ == "__main__":
     def analyze_dexter():
         data_set_name = label(dexter)
         X, y = dexter()
+        
+        dt = DecisionTreeClassifier(class_weight='balanced', max_depth=4, max_leaf_nodes=5)
+        dt.fit(X, y)
+        plot_dt_tree(dt, data_set_name)
 
         X_df = pd.DataFrame(X)
         # Remove non-zero columns
@@ -675,8 +694,8 @@ if __name__ == "__main__":
         counts = np.sort(counts)[::-1]
         print('counts', counts[0:100])
 
-    analyze_dexter()
     analyze_polish_bankruptcy()
+    analyze_dexter()
 
     """
     selected_data_sets = [polish_bankruptcy, dexter] # [polish_bankruptcy, pima, bank, circles, credit_card_default, titanic, spambase]

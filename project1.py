@@ -77,6 +77,7 @@ size_limit = 10000
 num_folds = 10
 tuning_iterations = 200
 tuning_granularity = 1000
+do_probability = True
 # https://scikit-learn.org/stable/modules/model_evaluation.html#common-cases-predefined-values
 #scoring = 'accuracy'
 #scoring = 'roc_auc'
@@ -104,9 +105,8 @@ pr_auc_scorer = make_scorer(pr_auc_score, greater_is_better=True,
 
 def skip(data_set_name, model_name):
     #if model_name not in ['Decision Tree', 'Ada Boost',  'MLP', 'SVM (Linear)', 'SVM (RBF)']:
-    #if data_set_name == 'Dexter' and model_name == 'SVM (RBF)':
+    #if data_set_name == 'Polish Bankruptcy' and model_name == 'SVM (Linear)':
     #    return False
-    #return True
     return False
 
 # Based on https://stackoverflow.com/a/50354131
@@ -114,10 +114,6 @@ def label_bars(text_format, **kwargs):
     ax = plt.gca()
     fig = plt.gcf()
     bars = ax.patches
-    """
-    for tick in ax.get_xticklabels():
-        tick.set_rotation(45)
-    """
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -132,13 +128,7 @@ def label_bars(text_format, **kwargs):
         if bar.get_window_extent(renderer).width < 10:
             color = 'black'
             ha = 'left'
-            text_y = bar.get_y() + 1.5 * bar.get_width()
-        """
-        if bar.get_window_extent(renderer).height < 10:
-            color = 'black'
-            va = 'bottom'
-            text_y = bar.get_y() + 1.5 * bar.get_height()
-        """
+            text_x = bar.get_x() + 1.5 * bar.get_width()
 
         ax.text(text_x, text_y, text, ha=ha, va=va, color=color, **kwargs)
 
@@ -164,13 +154,15 @@ def svm_linear(n, p):
                   'calibratedclassifiercv__base_estimator__C': np.logspace(-4, 3, num=tuning_granularity)}
     """
     max_iter = int(n*1.5)
-    estimator = SVC(kernel='linear', random_state=random_state, max_iter=20000)
+    estimator = SVC(kernel='linear', random_state=random_state, max_iter=20000,
+                    probability=do_probability)
     param_grid = [{'svc__max_iter': np.linspace(start=1, stop=max_iter, num=max_iter).astype(int),
                   'svc__C': np.logspace(-5, 3, num=tuning_granularity)}]
     return estimator, param_grid
 
 def svm_poly(n, p):
-    estimator = SVC(kernel='poly', random_state=random_state, max_iter=20000)
+    estimator = SVC(kernel='poly', random_state=random_state, max_iter=20000,
+                    probability=do_probability)
     param_grid = {'svc__gamma': np.logspace(start=3, stop=-12, num=tuning_granularity),
                   'svc__max_iter': np.linspace(start=1, stop=n, num=n).astype(int),
                   'svc__C': np.logspace(-5, 5, num=tuning_granularity),
@@ -188,7 +180,8 @@ def svm_rbf(n, p):
         start_gamma = -2
         end_gamma = 5
         end_C = 3
-    estimator = SVC(kernel='rbf', random_state=random_state, max_iter=20000)
+    estimator = SVC(kernel='rbf', random_state=random_state, max_iter=20000,
+                    probability=do_probability)
     param_grid = [{'svc__gamma': np.logspace(start=start_gamma, stop=end_gamma, num=tuning_granularity),
                   'svc__max_iter': np.linspace(start=1, stop=max_iter_plot, num=tuning_granularity).astype(int),
                   'svc__C': np.logspace(-2, end_C, num=tuning_granularity)},
@@ -314,7 +307,9 @@ def get_path(title, data_set_name, model_name=None):
         os.makedirs(path)
     return path + '_' + title
 
-def save_fig(title, data_set_name, model_name=None):
+def save_fig(title, data_set_name, model_name=None, width=6, height=3):
+    fig = plt.gcf()
+    fig.set_size_inches(width, height)
     plt.savefig(get_path(title, data_set_name, model_name) + '.png', bbox_inches='tight')
     plt.close()
 
@@ -340,7 +335,7 @@ def plot_roc_curve(title, fig_num, y_test, y_predict):
     fpr, tpr, threshold = roc_curve(y_test, y_predict, pos_label=1)
     roc_auc = auc(fpr, tpr)
     plt.figure(fig_num)
-    plt.plot(fpr, tpr, label='ROC for %s (area = %0.3f)' % (title, roc_auc))
+    plt.plot(fpr, tpr, label='%s (area = %0.3f)' % (title, roc_auc))
 
 ####################
 # Precision Recall
@@ -608,7 +603,7 @@ def plot_validation_curves(data_set_name, model_name, pipe, param_grid, X_train,
         param_name = param.split('__')[-1]
 
         best_param_value_str = str(best_param_value)
-        if isinstance(best_param_value_str, np.float64):
+        if isinstance(best_param_value, np.float64):
             if scale == 'log':
                 best_param_value_str = '%.3e' % (best_param_value)
             else:
@@ -726,8 +721,10 @@ def score_model(scoring, y_true, y_predict, pos_label=1):
         return recall_score(y_true, y_predict, pos_label=0)
 
 def score_train_and_test(estimator, scoring,
-                         X_train, y_train, X_test, y_test, fig_offset):
-    #probas_test = estimator.predict_proba(X_test)
+                         X_train, y_train, X_test, y_test, fig_offset, model):
+    if hasattr(estimator, 'best_estimator_'):
+        estimator = estimator.best_estimator_
+    probas_test = estimator.predict_proba(X_test)
     y_test_predict = estimator.predict(X_test)
 
     #probas_train = estimator.predict_proba(X_train)
@@ -736,7 +733,8 @@ def score_train_and_test(estimator, scoring,
     #orig_scores = cross_val_score(pipe, X_test, y_test, scoring=scoring, cv=num_folds, n_jobs=-1)
     train_score = score_model(scoring, y_train, y_train_predict)
     test_score = score_model(scoring, y_test, y_test_predict)
-    #plot_roc_curve(model_label(model), fig_offset+1, y_test, probas_test[:, 1])
+    if scoring == 'balanced_accuracy':
+        plot_roc_curve(model_label(model), fig_offset+1, y_test, probas_test[:, 1])
     #plot_precision_recall_curve(model_label(model), fig_offset+2, y_test, y_test_predict)
 
     return np.round(train_score, 3), np.round(test_score, 3)
@@ -752,14 +750,13 @@ def evaluate_model(data_set_name, model, X_train, y_train, X_test, y_test):
     result = pipe.fit(X_train, y_train)
     learning_time = perf_counter() - start_learning
 
-    orig_train_score, orig_test_score = score_train_and_test(result, scoring, X_train, y_train, X_test, y_test, 0)
+    orig_train_score, orig_test_score = score_train_and_test(result, scoring, X_train, y_train, X_test, y_test, 0, model)
     """
-    probas = result.predict_proba(X_test)
-    y_predict = probas[:, 1]
     #orig_scores = cross_val_score(pipe, X_test, y_test, scoring=scoring, cv=num_folds, n_jobs=-1)
     orig_score = score_model(y_test, y_predict)
-    plot_roc_curve(model_label(model), 1, y_test, y_predict)
     plot_precision_recall_curve(model_label(model), 2, y_test, y_predict)
+    probas = result.predict_proba(X_test)
+    plot_roc_curve(model_label(model), 1, y_test, probas[:, 1])
     """
 
     start_query = perf_counter()
@@ -778,7 +775,9 @@ def evaluate_model(data_set_name, model, X_train, y_train, X_test, y_test):
                 plot_learning_curve('Tuned', data_set_name, model_label(model), tuned_estimator, X_train, y_train, False)
                 my_plot_confusion_matrix('Tuned train', data_set_name, model_label(model), tuned_estimator, X_train, y_train)
                 my_plot_confusion_matrix('Tuned test', data_set_name, model_label(model), tuned_estimator, X_test, y_test)
-                tuned_train_score, tuned_test_score = score_train_and_test(tuned_estimator, scoring, X_train, y_train, X_test, y_test, 2)
+                tuned_train_score, tuned_test_score = score_train_and_test(tuned_estimator, scoring, X_train, y_train, X_test, y_test, 2, model)
+                #probas = tuned_estimator.predict_proba(X_test)
+                #plot_roc_curve(model_label(model), 3, y_test, probas[:, 1])
                 plot_validation_curves(data_set_name, model_label(model), tuned_estimator, param_grid, X_train, y_train)
                 first = False
             else:
@@ -947,6 +946,7 @@ if __name__ == "__main__":
             plt.ylim([-0.45, 1.05])
             plt.xlabel('Recall')
             plt.ylabel('Precision')
+            """
 
             plt.figure(1, figsize=(7, 5))
             plt.title('Initial ROC AUC for %s' % (data_set_name))
@@ -965,7 +965,6 @@ if __name__ == "__main__":
             plt.ylim([-0.05, 1.05])
             plt.xlabel('False positive rate')
             plt.ylabel('True positive rate')
-            """
 
             tuned_train_scores = []
             tuned_test_scores = []
@@ -996,21 +995,21 @@ if __name__ == "__main__":
                     curr_extra_train_scores = {}
                     curr_extra_test_scores = {}
                     for extra_metric in extra_metrics:
-                        train_score, test_score = score_train_and_test(e, extra_metric, X_train, y_train, X_test, y_test, 0)
+                        train_score, test_score = score_train_and_test(e, extra_metric, X_train, y_train, X_test, y_test, 0, model)
                         curr_extra_train_scores[extra_metric] = train_score
                         curr_extra_test_scores[extra_metric] = test_score
                     train.append(curr_extra_train_scores)
                     test.append(curr_extra_test_scores)
 
-            """
             plt.figure(1)
             plt.legend()
-            save_fig('initial_roc_auc_curve', data_set_name)
+            save_fig('initial_roc_auc_curve', data_set_name, width=6, height=6)
 
             plt.figure(3)
             plt.legend()
-            save_fig('optimized_roc_auc_curve', data_set_name)
-
+            save_fig('optimized_roc_auc_curve', data_set_name, width=6, height=6)
+            
+            """
             plt.figure(2)
             plt.legend()
             save_fig('initial_precision_recall_curve', data_set_name)
@@ -1055,6 +1054,7 @@ if __name__ == "__main__":
             comparison_bar_chart(data_set_name, scoring, model_names, ['Original', 'Tuned'], test_scores, tuned_test_scores)
             save_fig('before_and_after', data_set_name)
 
+            """
             plt.figure(11)
             plt.legend()
             save_fig('training_times', data_set_name)
@@ -1062,6 +1062,7 @@ if __name__ == "__main__":
             plt.figure(12)
             plt.legend()
             save_fig('query_times', data_set_name)
+            """
 
             for title, train, test in [('Initial', extra_train_scores, extra_test_scores), ('Tuned', extra_tuned_train_scores, extra_tuned_test_scores)]:
                 for extra_metric in extra_metrics:
